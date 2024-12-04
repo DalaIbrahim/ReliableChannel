@@ -4,12 +4,22 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class RUDPSource {
     private InetAddress serverIP; // The IP address of the server
     private int serverPort; // The port number of the server
     private DatagramSocket socket; // The socket used for communication
     private static final int TIMEOUT = 3000; // Timeout interval in milliseconds
+    private static final int WINDOW_SIZE = 5; // Window size for sliding window protocol
+     private Map<Integer, byte[]> window = new HashMap<>(); // Sliding window of packets
+    private int base = 0; // Base of the window
+    private int nextSeqNum = 0; // Next sequence number to be used
+    private int duplicateAckCount = 0; // Count of duplicate ACKs
+    private int lastAckReceived = -1; // Last ACK received
+    private AtomicInteger sequenceNumber = new AtomicInteger(0); // Sequence number generator
 
     public RUDPSource(String serverIP, int serverPort) throws Exception {
         try {
@@ -23,24 +33,43 @@ public class RUDPSource {
     }
 
     // Send packets to server
-    public void sendPacketToServer(byte[] buffer, int start, int length) throws Exception {
+    public void sendPacketToServer(byte[] buffer, int seqNum) throws Exception {
         try {
-            DatagramPacket packet = new DatagramPacket(buffer, length, serverIP, serverPort);
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, serverIP, serverPort);
             while (true) {
                 socket.send(packet);
-                System.out.println("[DATA TRANSMISSION]: " + start + " | " + length);
+                System.out.println("[DATA TRANSMISSION]: " + seqNum + " | " + buffer.length);
                 try {
                     // Wait for ACK
                     byte[] ackBuffer = new byte[1024];
                     DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
                     socket.receive(ackPacket);
                     String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
-                    if (ack.equals("ACK")) {
-                        System.out.println("ACK received for packet starting at " + start);
-                        break; // Exit the loop if ACK is received
+                    int ackSeqNum = Integer.parseInt(ack.split(" ")[1]);
+                    if (ack.startsWith("ACK")) {
+                        System.out.println("ACK received for packet with sequence number " + ackSeqNum);
+                        if (ackSeqNum < base || ackSeqNum >= base + WINDOW_SIZE) {
+                            System.out.println("ACK for sequence number " + ackSeqNum + " is outside the window, ignoring.");
+                            continue; // Ignore ACKs outside the window
+                        }
+                        if (ackSeqNum == base) {
+                            base++;
+                            duplicateAckCount = 0;
+                            break; // Exit the loop if ACK is received for the base packet
+                        } else if (ackSeqNum == lastAckReceived) {
+                            duplicateAckCount++;
+                            if (duplicateAckCount == 3) {
+                                System.out.println("3 duplicate ACKs received, retransmitting packet with sequence number " + base);
+                                socket.send(new DatagramPacket(window.get(base), window.get(base).length, serverIP, serverPort));
+                                duplicateAckCount = 0;
+                            }
+                        } else {
+                            lastAckReceived = ackSeqNum;
+                            duplicateAckCount = 0;
+                        }
                     }
                 } catch (SocketTimeoutException e) {
-                    System.out.println("Timeout waiting for ACK, retransmitting packet starting at " + start);
+                    System.out.println("Timeout waiting for ACK, retransmitting packet with sequence number " + seqNum);
                 }
             }
         } catch (Exception e) {
@@ -54,18 +83,26 @@ public class RUDPSource {
         FileInputStream fis = new FileInputStream(file);
         byte[] buffer = new byte[1024];
         int bytesRead;
-        int offset = 0;
         while ((bytesRead = fis.read(buffer)) != -1) {
-            sendPacketToServer(buffer, offset, bytesRead);
-            offset += bytesRead;
+            while (nextSeqNum >= base + WINDOW_SIZE) {
+                // Wait until there is space in the window
+            }
+            byte[] packetData = new byte[bytesRead];
+            System.arraycopy(buffer, 0, packetData, 0, bytesRead);
+            int seqNum = sequenceNumber.getAndIncrement();
+            window.put(seqNum, packetData);
+            sendPacketToServer(packetData, seqNum);
+            nextSeqNum++;
         }
         fis.close();
     }
 
-    // Send file name to server
+    // Send file name to server and wait for ACK
     public void sendFileName(String fileName) throws Exception {
         byte[] buffer = fileName.getBytes();
-        sendPacketToServer(buffer, 0, buffer.length);
+        int seqNum = sequenceNumber.getAndIncrement();
+        window.put(seqNum, buffer);
+        sendPacketToServer(buffer, seqNum);
     }
 
     public void start(String fileName) throws Exception {
@@ -76,11 +113,10 @@ public class RUDPSource {
             // send file
             sendFile(fileName);
 
-            //start receiving packets
-            sendPacketToServer("END".getBytes(),0,"END".getBytes().length);
-
+            // Send the last packet in order to terminate the server 
+            sendPacketToServer("END".getBytes(), sequenceNumber.getAndIncrement());
         } catch (InterruptedException e) {
-            System.err.println("Error during packet sending loop: "+ e.getMessage());
+            System.err.println("Error during packet sending loop: " + e.getMessage());
         }
     }
 
