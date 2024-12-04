@@ -3,28 +3,46 @@ import java.io.FileInputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketTimeoutException;
 
 public class RUDPSource {
     private InetAddress serverIP; // The IP address of the server
     private int serverPort; // The port number of the server
     private DatagramSocket socket; // The socket used for communication
+    private static final int TIMEOUT = 3000; // Timeout interval in milliseconds
 
     public RUDPSource(String serverIP, int serverPort) throws Exception {
         try {
         this.serverIP = InetAddress.getByName(serverIP);
         this.serverPort = serverPort;
         this.socket = new DatagramSocket();
+        this.socket.setSoTimeout(TIMEOUT); // Set the timeout interval
         } catch (Exception e) {
             System.err.println("Error setting up client: " + e.getMessage());
         }
     }
 
-    //send packets to server
-    public void sendPacketToServer(byte[] buffer,int start, int length) throws Exception {
+    // Send packets to server
+    public void sendPacketToServer(byte[] buffer, int start, int length) throws Exception {
         try {
-            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, serverIP, serverPort);
-            socket.send(packet);
-            System.out.println("[DATA TRANSMISSION]: " + start + " | " + length);
+            DatagramPacket packet = new DatagramPacket(buffer, length, serverIP, serverPort);
+            while (true) {
+                socket.send(packet);
+                System.out.println("[DATA TRANSMISSION]: " + start + " | " + length);
+                try {
+                    // Wait for ACK
+                    byte[] ackBuffer = new byte[1024];
+                    DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
+                    socket.receive(ackPacket);
+                    String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
+                    if (ack.equals("ACK")) {
+                        System.out.println("ACK received for packet starting at " + start);
+                        break; // Exit the loop if ACK is received
+                    }
+                } catch (SocketTimeoutException e) {
+                    System.out.println("Timeout waiting for ACK, retransmitting packet starting at " + start);
+                }
+            }
         } catch (Exception e) {
             System.err.println("Error sending packet: " + e.getMessage());
         }
@@ -44,9 +62,17 @@ public class RUDPSource {
         fis.close();
     }
 
+    // Send file name to server
+    public void sendFileName(String fileName) throws Exception {
+        byte[] buffer = fileName.getBytes();
+        sendPacketToServer(buffer, 0, buffer.length);
+    }
 
     public void start(String fileName) throws Exception {
         try {
+            // Send the file name
+            sendFileName(fileName);
+
             // send file
             sendFile(fileName);
 
