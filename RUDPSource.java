@@ -52,10 +52,10 @@ public class RUDPSource {
                             System.out.println("ACK for sequence number " + ackSeqNum + " is outside the window, ignoring.");
                             continue; // Ignore ACKs outside the window
                         }
-                        if (ackSeqNum == base) {
-                            base++;
+                        if (ackSeqNum >= base) {
+                            base = ackSeqNum + 1;
                             duplicateAckCount = 0;
-                            break; // Exit the loop if ACK is received for the base packet
+                            break; // Exit the loop if ACK is received for a packet within the window
                         } else if (ackSeqNum == lastAckReceived) {
                             duplicateAckCount++;
                             if (duplicateAckCount == 3) {
