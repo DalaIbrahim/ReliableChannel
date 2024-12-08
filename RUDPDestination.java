@@ -4,6 +4,7 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 
 public class RUDPDestination {
     private int recvPort;
@@ -11,6 +12,10 @@ public class RUDPDestination {
     private Map<Integer, byte[]> receivedPackets = new HashMap<>();
     private int expectedSeqNum = 0;
     private String receivedFileName = "received_file-copy";
+    private static final double LOSS_RATE = 0.2; // 20% packet loss
+    private static final int MIN_DELAY = 100; // Minimum delay in milliseconds
+    private static final int MAX_DELAY = 500; // Maximum delay in milliseconds
+    private Random random = new Random();
 
     public RUDPDestination(int recvPort) throws Exception {
         this.recvPort = recvPort;
@@ -23,8 +28,20 @@ public class RUDPDestination {
 
         while (true) {
             socket.receive(packet);
+
+            // Simulate packet loss
+            if (random.nextDouble() < LOSS_RATE) {
+                System.out.println("[PACKET LOST]: Simulated loss of packet from " + packet.getAddress() + ":" + packet.getPort());
+                continue;
+            }
+
+            // Simulate delay
+            int delay = MIN_DELAY + random.nextInt(MAX_DELAY - MIN_DELAY + 1);
+            Thread.sleep(delay);
+            System.out.println("[PACKET DELAYED]: Simulated delay of " + delay + "ms");
+
             String receivedData = new String(packet.getData(), 0, packet.getLength());
-            
+
             if (receivedData.equals("END")) {
                 System.out.println("[COMPLETE] File transfer complete.");
                 writeFile();
