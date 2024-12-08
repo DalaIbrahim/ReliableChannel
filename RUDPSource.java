@@ -32,48 +32,42 @@ public class RUDPSource {
         }
     }
 
-    // Send packets to server
+    // send packets to server
     public void sendPacketToServer(byte[] buffer, int seqNum) throws Exception {
-        try {
-            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, serverIP, serverPort);
-            while (true) {
-                socket.send(packet);
-                System.out.println("[DATA TRANSMISSION]: " + seqNum + " | " + buffer.length);
-                try {
-                    // Wait for ACK
-                    byte[] ackBuffer = new byte[1024];
-                    DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
-                    socket.receive(ackPacket);
-                    String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
-                    int ackSeqNum = Integer.parseInt(ack.split(" ")[1]);
-                    if (ack.startsWith("ACK")) {
-                        System.out.println("ACK received for packet with sequence number " + ackSeqNum);
-                        if (ackSeqNum < base || ackSeqNum >= base + WINDOW_SIZE) {
-                            System.out.println("ACK for sequence number " + ackSeqNum + " is outside the window, ignoring.");
-                            continue; // Ignore ACKs outside the window
-                        }
-                        if (ackSeqNum >= base) {
-                            base = ackSeqNum + 1;
-                            duplicateAckCount = 0;
-                            break; // Exit the loop if ACK is received for a packet within the window
-                        } else if (ackSeqNum == lastAckReceived) {
-                            duplicateAckCount++;
-                            if (duplicateAckCount == 3) {
-                                System.out.println("3 duplicate ACKs received, retransmitting packet with sequence number " + base);
-                                socket.send(new DatagramPacket(window.get(base), window.get(base).length, serverIP, serverPort));
-                                duplicateAckCount = 0;
-                            }
-                        } else {
-                            lastAckReceived = ackSeqNum;
-                            duplicateAckCount = 0;
-                        }
-                    }
-                } catch (SocketTimeoutException e) {
-                    System.out.println("Timeout waiting for ACK, retransmitting packet with sequence number " + seqNum);
+        DatagramPacket packet = new DatagramPacket(buffer, buffer.length, serverIP, serverPort);
+        while (true) {
+            // Send the packet
+            socket.send(packet);
+            System.out.println("[DATA TRANSMISSION]: " + seqNum + " | " + buffer.length);
+    
+            try {
+                // Wait for ACK
+                byte[] ackBuffer = new byte[1024];
+                DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
+                socket.receive(ackPacket);
+    
+                String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
+                if (!ack.startsWith("ACK")) {
+                    continue; // Ignore invalid ACKs
                 }
+    
+                int ackSeqNum = Integer.parseInt(ack.split(" ")[1]);
+                System.out.println("ACK received for sequence number " + ackSeqNum);
+    
+                if (ackSeqNum == -1) { // END acknowledgment
+                    System.out.println("Transfer completed. Exiting...");
+                    return; // Exit transmission loop
+                }
+    
+                if (ackSeqNum >= base && ackSeqNum < base + WINDOW_SIZE) {
+                    base = ackSeqNum + 1; // Move the window forward
+                    break; // Successful acknowledgment, exit loop
+                } else {
+                    System.out.println("ACK for sequence number " + ackSeqNum + " is outside the window, ignoring.");
+                }
+            } catch (SocketTimeoutException e) {
+                System.out.println("Timeout waiting for ACK, retransmitting packet with sequence number " + seqNum);
             }
-        } catch (Exception e) {
-            System.err.println("Error sending packet: " + e.getMessage());
         }
     }
 
@@ -108,35 +102,42 @@ public class RUDPSource {
 
     public void start(String fileName) throws Exception {
         try {
-            // Send the file name
+            // Step 1: Send the file name
             sendFileName(fileName);
-
-            // send file
+    
+            // Step 2: Send the file content
             sendFile(fileName);
-
+    
+            // Step 3: Send the END packet and wait for acknowledgment
             int seqNum = sequenceNumber.getAndIncrement();
-            sendPacketToServer(("END").getBytes(), seqNum);
-            // Send the last packet in order to terminate the server 
-            // Wait for acknowledgment of the END packet
+            byte[] endData = "END".getBytes();
+            DatagramPacket endPacket = new DatagramPacket(endData, endData.length, serverIP, serverPort);
+    
             while (true) {
+                // Send the END packet
+                socket.send(endPacket);
+                System.out.println("[DATA TRANSMISSION]: END");
+    
                 try {
+                    // Wait for acknowledgment
                     byte[] ackBuffer = new byte[1024];
                     DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
                     socket.receive(ackPacket);
+    
                     String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
-                    int ackSeqNum = Integer.parseInt(ack.split(" ")[1]);
-
-                    if (ackSeqNum == -1) { // Acknowledgment for END
-                        System.out.println("ACK received for END packet");
-                        break;
+                    if (ack.startsWith("ACK")) {
+                        int ackSeqNum = Integer.parseInt(ack.split(" ")[1]);
+                        if (ackSeqNum == -1) { // Acknowledgment for END
+                            System.out.println("ACK received for END packet. Transfer complete.");
+                            return; // Exit the method
+                        }
                     }
                 } catch (SocketTimeoutException e) {
                     System.out.println("Timeout waiting for ACK of END packet, retransmitting...");
-                    sendPacketToServer(("END").getBytes(), seqNum);
                 }
             }
-        } catch (InterruptedException e) {
-            System.err.println("Error during packet sending loop: " + e.getMessage());
+        } catch (Exception e) {
+            System.err.println("Error during file transfer: " + e.getMessage());
         }
     }
 
