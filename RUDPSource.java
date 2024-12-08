@@ -89,11 +89,9 @@ public class RUDPSource {
             }
             int seqNum = sequenceNumber.getAndIncrement();
             String formattedData = seqNum + " " + new String(buffer, 0, bytesRead);
-            byte[] packetData = formattedData.getBytes();
-            System.arraycopy(buffer, 0, packetData, 0, bytesRead);
+            byte[] packetData = formattedData.getBytes();  // Correctly formatted packet
             window.put(seqNum, packetData);
             sendPacketToServer(packetData, seqNum);
-            nextSeqNum++;
         }
         fis.close();
     }
@@ -116,8 +114,27 @@ public class RUDPSource {
             // send file
             sendFile(fileName);
 
+            int seqNum = sequenceNumber.getAndIncrement();
+            sendPacketToServer(("END").getBytes(), seqNum);
             // Send the last packet in order to terminate the server 
-            sendPacketToServer("END".getBytes(), sequenceNumber.getAndIncrement());
+            // Wait for acknowledgment of the END packet
+            while (true) {
+                try {
+                    byte[] ackBuffer = new byte[1024];
+                    DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
+                    socket.receive(ackPacket);
+                    String ack = new String(ackPacket.getData(), 0, ackPacket.getLength());
+                    int ackSeqNum = Integer.parseInt(ack.split(" ")[1]);
+
+                    if (ackSeqNum == -1) { // Acknowledgment for END
+                        System.out.println("ACK received for END packet");
+                        break;
+                    }
+                } catch (SocketTimeoutException e) {
+                    System.out.println("Timeout waiting for ACK of END packet, retransmitting...");
+                    sendPacketToServer(("END").getBytes(), seqNum);
+                }
+            }
         } catch (InterruptedException e) {
             System.err.println("Error during packet sending loop: " + e.getMessage());
         }

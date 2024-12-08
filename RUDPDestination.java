@@ -44,6 +44,11 @@ public class RUDPDestination {
 
             if (receivedData.equals("END")) {
                 System.out.println("[COMPLETE] File transfer complete.");
+                InetAddress senderIP = packet.getAddress();
+                int senderPort = packet.getPort();
+            
+                // Send ACK for END
+                sendAck(senderIP, senderPort, -1); // Use -1 to represent END acknowledgment
                 writeFile();
                 break;
             }
