@@ -87,9 +87,10 @@ public class RUDPSource {
             while (nextSeqNum >= base + WINDOW_SIZE) {
                 // Wait until there is space in the window
             }
-            byte[] packetData = new byte[bytesRead];
-            System.arraycopy(buffer, 0, packetData, 0, bytesRead);
             int seqNum = sequenceNumber.getAndIncrement();
+            String formattedData = seqNum + " " + new String(buffer, 0, bytesRead);
+            byte[] packetData = formattedData.getBytes();
+            System.arraycopy(buffer, 0, packetData, 0, bytesRead);
             window.put(seqNum, packetData);
             sendPacketToServer(packetData, seqNum);
             nextSeqNum++;
@@ -99,11 +100,13 @@ public class RUDPSource {
 
     // Send file name to server and wait for ACK
     public void sendFileName(String fileName) throws Exception {
-        byte[] buffer = fileName.getBytes();
         int seqNum = sequenceNumber.getAndIncrement();
-        window.put(seqNum, buffer);
-        sendPacketToServer(buffer, seqNum);
+        String formattedFileName = seqNum + " " + fileName; // Prepend sequence number
+        byte[] fileNameData = formattedFileName.getBytes();
+        window.put(seqNum, fileNameData);
+        sendPacketToServer(fileNameData, seqNum);
     }
+    
 
     public void start(String fileName) throws Exception {
         try {
