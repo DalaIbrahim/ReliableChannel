@@ -14,7 +14,7 @@ public class RUDPSource {
     private DatagramSocket socket; // The socket used for communication
     private static final int TIMEOUT = 3000; // Timeout interval in milliseconds
     private static final int WINDOW_SIZE = 5; // Window size for sliding window protocol
-     private Map<Integer, byte[]> window = new HashMap<>(); // Sliding window of packets
+    private Map<Integer, byte[]> window = new HashMap<>(); // Sliding window of packets
     private int base = 0; // Base of the window
     private int nextSeqNum = 0; // Next sequence number to be used
     private int duplicateAckCount = 0; // Count of duplicate ACKs
@@ -60,7 +60,22 @@ public class RUDPSource {
                 }
     
                 if (ackSeqNum >= base && ackSeqNum < base + WINDOW_SIZE) {
-                    base = ackSeqNum + 1; // Move the window forward
+                    if (ackSeqNum == lastAckReceived) {
+                        duplicateAckCount++;
+                        if (duplicateAckCount == 3) {
+                            // Resend the first packet in the window
+                            int firstPacketSeqNum = base;
+                            byte[] firstPacketData = window.get(firstPacketSeqNum);
+                            DatagramPacket firstPacket = new DatagramPacket(firstPacketData, firstPacketData.length, serverIP, serverPort);
+                            socket.send(firstPacket);
+                            System.out.println("Resending packet with sequence number " + firstPacketSeqNum);
+                            duplicateAckCount = 0; // Reset duplicate ACK count
+                        }
+                    } else {
+                        duplicateAckCount = 0; // Reset duplicate ACK count
+                    }
+                    lastAckReceived = ackSeqNum;
+                    base = ackSeqNum +1; // Move the window forward
                     break; // Successful acknowledgment, exit loop
                 } else {
                     System.out.println("ACK for sequence number " + ackSeqNum + " is outside the window, ignoring.");
@@ -109,7 +124,6 @@ public class RUDPSource {
             sendFile(fileName);
     
             // Step 3: Send the END packet and wait for acknowledgment
-            int seqNum = sequenceNumber.getAndIncrement();
             byte[] endData = "END".getBytes();
             DatagramPacket endPacket = new DatagramPacket(endData, endData.length, serverIP, serverPort);
     
